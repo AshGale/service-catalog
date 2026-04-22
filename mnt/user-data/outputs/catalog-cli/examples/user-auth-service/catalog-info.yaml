@@ -1,0 +1,29 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: user-auth-service
+  description: |
+    Manages user authentication, session tokens, and OAuth2 flows.
+
+    Architecture Diagram:
+    ```mermaid
+    graph TD
+      A[Web UI] -->|REST API| B(Auth Service)
+      B -->|Queries| C[(PostgreSQL: users)]
+      B -->|Publishes| D{Kafka Topic: auth-events}
+      B -->|REST API| E[Google OAuth2]
+    ```
+  tags:
+    - go
+    - grpc
+    - critical-path
+spec:
+  type: service
+  lifecycle: production
+  owner: team-platform
+  dependsOn:
+    - resource:postgres-users-db
+    - resource:kafka-auth-topic
+  providesApis:
+    - api:auth-grpc-api
+    - api:auth-rest-api

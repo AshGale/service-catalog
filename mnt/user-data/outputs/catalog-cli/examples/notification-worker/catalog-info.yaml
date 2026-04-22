@@ -1,0 +1,25 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: notification-worker
+  description: |
+    Consumes events from Kafka and dispatches email/push/SMS notifications.
+
+    Architecture Diagram:
+    ```mermaid
+    graph TD
+      A{Kafka Topic: notifications-in} -->|Consumes| B(Notification Worker)
+      B -->|SMTP| C[SendGrid]
+      B -->|REST API| D[Firebase Cloud Messaging]
+      B -->|REST API| E[Twilio SMS]
+    ```
+  tags:
+    - python
+    - celery
+    - async
+spec:
+  type: service
+  lifecycle: production
+  owner: team-comms
+  dependsOn:
+    - resource:kafka-notifications-topic

@@ -1,0 +1,26 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: payment-processing-service
+  description: |
+    Handles all external credit card processing and internal wallet top-ups.
+
+    Architecture Diagram:
+    ```mermaid
+    graph TD
+      A[Web UI] -->|REST API| B(Payment Service)
+      B -->|Produces Event| C{Kafka Topic: payments-out}
+      B -->|REST API| D[Stripe External API]
+    ```
+  tags:
+    - python
+    - fastapi
+    - critical-path
+spec:
+  type: service
+  lifecycle: production
+  owner: team-finance
+  dependsOn:
+    - resource:kafka-payments-topic
+  providesApis:
+    - api:payment-rest-api
