@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p catalog_cli tests)",
+      "Bash(touch catalog_cli/__init__.py tests/__init__.py)",
+      "Bash(cp config.py catalog_cli/config.py)",
+      "Bash(cp db.py catalog_cli/db.py)",
+      "Bash(cp genai.py catalog_cli/genai.py)",
+      "Bash(cp ingest.py catalog_cli/ingest.py)",
+      "Bash(cp main.py catalog_cli/main.py)",
+      "Bash(make bootstrap:*)",
+      "Bash(docker compose:*)",
+      "Bash(conda --version)",
+      "Bash(conda env:*)",
+      "Bash(conda create:*)",
+      "Bash(conda run:*)",
+      "Bash(docker exec:*)",
+      "Bash(rm -rf db/init.sql)",
+      "Bash(cp init.sql db/init.sql)"
+    ]
+  }
+}
