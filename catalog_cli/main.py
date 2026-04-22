@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import sys
+import yaml
 from pathlib import Path
 from typing import Optional
 
@@ -238,6 +239,31 @@ def ingest(
         for n in names:
             console.print(f"[green]✓[/] Ingested [bold]{n}[/]")
         console.print(f"\n[bold]{len(names)}[/] service(s) ingested.")
+
+
+# ── Dump ───────────────────────────────────────────────────────────────────
+
+
+@app.command()
+def dump(
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Write to file (default: print to stdout)"),
+    fmt: str = typer.Option("json", "--format", "-f", help="Output format: json or yaml"),
+):
+    """Dump the full catalog (all services, all fields, no embeddings) to JSON or YAML."""
+    rows = db.dump_all()
+    if not rows:
+        _abort("Catalog is empty — ingest some services first.")
+
+    if fmt == "yaml":
+        text = yaml.dump(rows, sort_keys=False, allow_unicode=True)
+    else:
+        text = json.dumps(rows, indent=2, ensure_ascii=False)
+
+    if output:
+        Path(output).write_text(text, encoding="utf-8")
+        console.print(f"[green]✓[/] Wrote {len(rows)} service(s) to [bold]{output}[/]")
+    else:
+        console.print(text)
 
 
 # ── DB bootstrap helper ────────────────────────────────────────────────────

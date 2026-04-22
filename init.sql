@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS service_catalog (
     lifecycle VARCHAR(50),
     metadata JSONB,
     raw_content TEXT,
-    -- 1536 dims fits within pgvector's HNSW limit of 2000; update if your model differs
-    embedding VECTOR(1536),
+    -- nomic-embed-text = 768 dims; update if you swap models
+    embedding VECTOR(768),
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

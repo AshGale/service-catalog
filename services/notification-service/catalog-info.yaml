@@ -1,0 +1,53 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: notification-service
+  description: |
+    Multi-channel notification service. Consumes order and inventory events from Kafka
+    and dispatches SMS, email, and push notifications to customers and internal ops teams.
+
+    ## Responsibilities
+    - Consumes orders-created, orders-fulfilled, orders-cancelled from Kafka
+    - Sends order confirmation emails (via SendGrid) and SMS (via Twilio)
+    - Consumes inventory-low-stock and pages the on-call logistics team
+    - Applies per-customer notification preferences (opt-out, channel preference)
+
+    ## Notification templates
+    Templates are stored in the notifications-db as Jinja2 strings. Each template is
+    keyed by (event_type, channel). Adding a new order type (e.g. fragile) requires:
+      1. New templates: fragile_order_confirmation_email, fragile_order_confirmation_sms
+         — these must include "handle with care" instructions and fragile item warnings
+      2. A new event_type value in the template key enum (notification-db migration)
+      3. The orders-created Kafka event must carry a handling_instructions field that
+         this service reads to select the right template
+      4. Coordination with order-service to ensure the field is populated for fragile orders
+
+    ## SLA
+    Notifications must be dispatched within 30 seconds of event consumption.
+    Fragile order notifications are considered higher priority — they should be sent
+    before the standard fulfilment SLA window begins.
+
+    Architecture Diagram:
+    ```mermaid
+    graph TD
+      A{Kafka: orders-created} -->|Consumes| B(Notification Service)
+      C{Kafka: inventory-low-stock} -->|Consumes| B
+      B -->|Email| D[SendGrid]
+      B -->|SMS| E[Twilio]
+      B -->|Read/Write| F[(notifications-db)]
+    ```
+  tags:
+    - nodejs
+    - kafka-consumer
+    - notifications
+    - sendgrid
+    - twilio
+spec:
+  type: service
+  lifecycle: production
+  owner: team-commerce
+  dependsOn:
+    - resource:kafka-orders-topic
+    - resource:kafka-inventory-topic
+    - resource:notifications-db
+  providesApis: []

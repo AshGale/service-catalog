@@ -1,0 +1,57 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: order-service
+  description: |
+    Core order management service. Handles the full lifecycle of a customer order:
+    creation, validation, status transitions, and fulfilment dispatch.
+
+    ## Responsibilities
+    - Accepts new orders via REST API from the web-frontend and mobile-gateway
+    - Validates item availability by calling inventory-service before confirming
+    - Charges customers by delegating to payment-processing-service
+    - Publishes order lifecycle events to Kafka (orders-created, orders-fulfilled, orders-cancelled)
+    - Stores order state in its own Postgres database (order-db)
+
+    ## Item model
+    Each order line carries an item_type field. Current valid values: "standard", "perishable".
+    Adding new item types (e.g. "fragile") requires:
+      1. A schema migration on order-db (orders table, order_lines table)
+      2. A new validation rule in OrderValidator — fragile items must have special_handling=true
+      3. A contract change on the orders-created Kafka event (add handling_instructions field)
+      4. Coordination with inventory-service (fragile stock is tracked separately)
+      5. Coordination with notification-service (fragile orders trigger an additional "handle with care" SMS)
+
+    ## Known fragility concerns
+    The OrderValidator is tightly coupled to the item_type enum. Any new item type must be
+    added to the ItemType enum in domain/models.py and the corresponding database migration
+    must be run before deployment. Rollback requires re-migration.
+
+    Architecture Diagram:
+    ```mermaid
+    graph TD
+      A[Web Frontend] -->|POST /orders| B(Order Service)
+      C[Mobile Gateway] -->|POST /orders| B
+      B -->|GET /stock/:item_id| D[Inventory Service]
+      B -->|POST /charge| E[Payment Processing Service]
+      B -->|Produces| F{Kafka: orders-created}
+      B -->|Produces| G{Kafka: orders-fulfilled}
+      F -->|Consumes| H[Notification Service]
+    ```
+  tags:
+    - java
+    - spring-boot
+    - kafka-producer
+    - critical-path
+    - order-domain
+spec:
+  type: service
+  lifecycle: production
+  owner: team-commerce
+  dependsOn:
+    - component:inventory-service
+    - component:payment-processing-service
+    - resource:kafka-orders-topic
+    - resource:order-db
+  providesApis:
+    - api:order-rest-api

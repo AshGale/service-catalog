@@ -177,16 +177,16 @@ class TestGenAIClient:
     def test_embed_returns_vector(self):
         from catalog_cli.genai import embed
 
-        fake_vector = [0.1] * 4096
+        fake_vector = [0.1] * 768
         with patch("catalog_cli.genai.requests.post") as mock_post:
             mock_post.return_value = MagicMock(
                 status_code=200,
-                json=lambda: {"vector": fake_vector},
+                json=lambda: {"embedding": fake_vector},
             )
             result = embed("test text")
             assert result == fake_vector
             call_body = mock_post.call_args[1]["json"]
-            assert call_body["type"] == "embedding"
+            assert call_body["model"] == "nomic-embed-text"
 
     def test_generate_returns_text(self):
         from catalog_cli.genai import generate
@@ -194,7 +194,7 @@ class TestGenAIClient:
         with patch("catalog_cli.genai.requests.post") as mock_post:
             mock_post.return_value = MagicMock(
                 status_code=200,
-                json=lambda: {"text": "The answer is 42."},
+                json=lambda: {"response": "The answer is 42."},
             )
             result = generate("What is the answer?")
             assert result == "The answer is 42."
@@ -290,7 +290,7 @@ class TestAPI:
         assert resp.status_code == 400
 
     def test_ask_with_mocked_genai(self, client):
-        fake_vector = [0.0] * 4096
+        fake_vector = [0.0] * 768
         with (
             patch("catalog_cli.genai.embed", return_value=fake_vector),
             patch("catalog_cli.db.vector_search", return_value=["raw content here"]),
@@ -315,7 +315,7 @@ class TestConfig:
 
         assert config.DB_HOST == "localhost"
         assert config.DB_PORT == 5432
-        assert config.EMBEDDING_DIM == 1536
+        assert config.EMBEDDING_DIM == 768
         assert config.RAG_TOP_K == 5
 
     def test_env_override(self, monkeypatch):

@@ -1,8 +1,8 @@
-"""Client for the internal /genai endpoint (Llama 3)."""
+"""Ollama client — embed and generate via local Ollama server."""
 
 from __future__ import annotations
 
-import sys
+import json
 from typing import Iterator
 
 import requests
@@ -11,74 +11,59 @@ from catalog_cli import config
 
 
 class GenAIError(Exception):
-    """Raised when the /genai endpoint returns a non-200 response."""
+    """Raised when the Ollama API returns an error."""
 
 
-def _post(payload: dict) -> dict:
-    """Fire a POST to the genai endpoint and return the JSON body."""
+def _ollama_post(path: str, payload: dict, stream: bool = False) -> requests.Response:
+    url = f"{config.OLLAMA_BASE_URL}{path}"
     try:
-        resp = requests.post(
-            config.GENAI_ENDPOINT,
-            json=payload,
-            timeout=120,
-        )
+        resp = requests.post(url, json=payload, stream=stream, timeout=300)
     except requests.ConnectionError as exc:
-        raise GenAIError(f"Cannot reach {config.GENAI_ENDPOINT}: {exc}") from exc
-
+        raise GenAIError(f"Cannot reach Ollama at {config.OLLAMA_BASE_URL}: {exc}") from exc
     if resp.status_code != 200:
-        raise GenAIError(
-            f"/genai returned {resp.status_code}: {resp.text[:500]}"
-        )
-    return resp.json()
+        raise GenAIError(f"Ollama {path} returned {resp.status_code}: {resp.text[:500]}")
+    return resp
 
 
 def embed(text: str) -> list[float]:
-    """Return a vector embedding for *text* from Llama 3."""
-    data = _post({"prompt": text, "type": "embedding"})
-    vector = data.get("vector")
+    """Return a vector embedding using Ollama's embed model."""
+    resp = _ollama_post("/api/embeddings", {"model": config.OLLAMA_EMBED_MODEL, "prompt": text})
+    data = resp.json()
+    vector = data.get("embedding")
     if not vector or not isinstance(vector, list):
-        raise GenAIError("Response missing 'vector' field or invalid format")
+        raise GenAIError(f"Ollama embeddings response missing 'embedding' field: {data}")
     return vector
 
 
 def generate(prompt: str) -> str:
-    """Return a text completion from Llama 3."""
-    data = _post({"prompt": prompt, "type": "generation"})
-    text = data.get("text")
+    """Return a text completion from Ollama (non-streaming)."""
+    resp = _ollama_post(
+        "/api/generate",
+        {"model": config.OLLAMA_GENERATE_MODEL, "prompt": prompt, "stream": False},
+    )
+    data = resp.json()
+    text = data.get("response")
     if text is None:
-        raise GenAIError("Response missing 'text' field")
+        raise GenAIError(f"Ollama generate response missing 'response' field: {data}")
     return text
 
 
 def generate_stream(prompt: str) -> Iterator[str]:
-    """Stream a text completion token-by-token.
-
-    Falls back to a single ``generate`` call if the endpoint doesn't
-    support streaming (i.e. returns a normal JSON body).
-    """
-    try:
-        resp = requests.post(
-            config.GENAI_ENDPOINT,
-            json={"prompt": prompt, "type": "generation", "stream": True},
-            stream=True,
-            timeout=120,
-        )
-    except requests.ConnectionError as exc:
-        raise GenAIError(f"Cannot reach {config.GENAI_ENDPOINT}: {exc}") from exc
-
-    if resp.status_code != 200:
-        raise GenAIError(f"/genai returned {resp.status_code}: {resp.text[:500]}")
-
-    content_type = resp.headers.get("content-type", "")
-
-    # If the endpoint returns JSON instead of a stream, fall back.
-    if "application/json" in content_type:
-        data = resp.json()
-        text = data.get("text", "")
-        yield text
-        return
-
-    # Otherwise, iterate over the streamed chunks.
-    for chunk in resp.iter_content(chunk_size=None, decode_unicode=True):
-        if chunk:
-            yield chunk
+    """Stream a text completion token-by-token from Ollama."""
+    resp = _ollama_post(
+        "/api/generate",
+        {"model": config.OLLAMA_GENERATE_MODEL, "prompt": prompt, "stream": True},
+        stream=True,
+    )
+    for line in resp.iter_lines():
+        if not line:
+            continue
+        try:
+            chunk = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        token = chunk.get("response", "")
+        if token:
+            yield token
+        if chunk.get("done"):
+            break

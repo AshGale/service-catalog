@@ -158,6 +158,32 @@ def vector_search(embedding: list[float], top_k: int | None = None) -> list[str]
             return [row[0] for row in cur.fetchall()]
 
 
+# ── Dump (full catalog export) ────────────────────────────────────────────
+
+
+def dump_all() -> list[dict[str, Any]]:
+    """Return every service with all columns except the embedding vector."""
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT service_name, owner, lifecycle, metadata, raw_content, last_updated
+                FROM service_catalog
+                ORDER BY service_name
+                """
+            )
+            rows = cur.fetchall()
+    result = []
+    for row in rows:
+        entry = dict(row)
+        if entry.get("last_updated"):
+            entry["last_updated"] = str(entry["last_updated"])
+        if entry.get("metadata") and isinstance(entry["metadata"], str):
+            entry["metadata"] = json.loads(entry["metadata"])
+        result.append(entry)
+    return result
+
+
 # ── Upsert (used by the ingestion pipeline) ────────────────────────────────
 
 

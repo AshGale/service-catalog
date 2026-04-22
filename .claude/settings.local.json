@@ -16,7 +16,14 @@
       "Bash(conda run:*)",
       "Bash(docker exec:*)",
       "Bash(rm -rf db/init.sql)",
-      "Bash(cp init.sql db/init.sql)"
+      "Bash(cp init.sql db/init.sql)",
+      "Bash(ollama --version)",
+      "Bash(ollama list:*)",
+      "Bash(ollama pull:*)",
+      "Bash(curl -s http://localhost:11434/api/tags)",
+      "Bash(python -m json.tool)",
+      "Bash(curl -s -X POST http://localhost:11434/api/generate -d \"{\\\\\"model\\\\\":\\\\\"llama3.1:8b-instruct-q5_1\\\\\",\\\\\"prompt\\\\\":\\\\\"Say hello in one word.\\\\\",\\\\\"stream\\\\\":false}\" --max-time 30)",
+      "Bash(curl -s -X POST http://localhost:11434/api/generate -d \"{\\\\\"model\\\\\":\\\\\"llama3.1:8b-instruct-q5_1\\\\\",\\\\\"prompt\\\\\":\\\\\"Say hello in one word.\\\\\",\\\\\"stream\\\\\":false}\" --max-time 120)"
     ]
   }
 }

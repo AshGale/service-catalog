@@ -1,0 +1,95 @@
+[
+  {
+    "service_name": "inventory-service",
+    "owner": "team-logistics",
+    "lifecycle": "production",
+    "metadata": {
+      "tags": [
+        "python",
+        "fastapi",
+        "warehouse",
+        "inventory-domain"
+      ],
+      "type": "service",
+      "dependsOn": [
+        "resource:inventory-db",
+        "resource:kafka-inventory-topic"
+      ],
+      "providesApis": [
+        "api:inventory-rest-api"
+      ]
+    },
+    "raw_content": "apiVersion: backstage.io/v1alpha1\nkind: Component\nmetadata:\n  name: inventory-service\n  description: |\n    Inventory and stock management service. Tracks product stock levels, warehouse\n    locations, and item classifications across all fulfilment centres.\n\n    ## Responsibilities\n    - Exposes a REST API for stock reservation and release (called by order-service)\n    - Maintains a product catalogue with per-item handling metadata\n    - Tracks item_class per SKU: \"standard\", \"perishable\", \"hazardous\"\n    - Publishes low-stock events to Kafka (inventory-low-stock)\n\n    ## Item classification model\n    Each product has an item_class field in the products table. Fragile items are not\n    yet a first-class concept — they are currently stored as a freeform tag in the\n    product metadata JSONB column. To properly support fragile items:\n      1. Add \"fragile\" as a valid item_class enum value (migration on inventory-db)\n      2. Expose a new filter on GET /products?item_class=fragile so order-service\n         can query fragile stock separately\n      3. Add a fragile_stock_level field to the StockReservationResponse so callers\n         know whether a reservation covers fragile or standard handling\n      4. Update the low-stock Kafka event schema to include item_class\n\n    ## Warehouse handling rules\n    Fragile items are stored in zone F of each warehouse. Zone F has a capacity limit\n    of 2,000 units per fulfilment centre. Reserving fragile stock must check zone capacity,\n    not just total stock count. This logic lives in WarehouseAllocator.allocate().\n\n    Architecture Diagram:\n    ```mermaid\n    graph TD\n      A[Order Service] -->|GET /stock/:id| B(Inventory Service)\n      A -->|POST /reserve| B\n      B -->|Read/Write| C[(inventory-db Postgres)]\n      B -->|Produces| D{Kafka: inventory-low-stock}\n    ```\n  tags:\n    - python\n    - fastapi\n    - warehouse\n    - inventory-domain\nspec:\n  type: service\n  lifecycle: production\n  owner: team-logistics\n  dependsOn:\n    - resource:inventory-db\n    - resource:kafka-inventory-topic\n  providesApis:\n    - api:inventory-rest-api\n",
+    "last_updated": "2026-04-22 20:31:58.722516"
+  },
+  {
+    "service_name": "notification-service",
+    "owner": "team-commerce",
+    "lifecycle": "production",
+    "metadata": {
+      "tags": [
+        "nodejs",
+        "kafka-consumer",
+        "notifications",
+        "sendgrid",
+        "twilio"
+      ],
+      "type": "service",
+      "dependsOn": [
+        "resource:kafka-orders-topic",
+        "resource:kafka-inventory-topic",
+        "resource:notifications-db"
+      ],
+      "providesApis": []
+    },
+    "raw_content": "apiVersion: backstage.io/v1alpha1\nkind: Component\nmetadata:\n  name: notification-service\n  description: |\n    Multi-channel notification service. Consumes order and inventory events from Kafka\n    and dispatches SMS, email, and push notifications to customers and internal ops teams.\n\n    ## Responsibilities\n    - Consumes orders-created, orders-fulfilled, orders-cancelled from Kafka\n    - Sends order confirmation emails (via SendGrid) and SMS (via Twilio)\n    - Consumes inventory-low-stock and pages the on-call logistics team\n    - Applies per-customer notification preferences (opt-out, channel preference)\n\n    ## Notification templates\n    Templates are stored in the notifications-db as Jinja2 strings. Each template is\n    keyed by (event_type, channel). Adding a new order type (e.g. fragile) requires:\n      1. New templates: fragile_order_confirmation_email, fragile_order_confirmation_sms\n         — these must include \"handle with care\" instructions and fragile item warnings\n      2. A new event_type value in the template key enum (notification-db migration)\n      3. The orders-created Kafka event must carry a handling_instructions field that\n         this service reads to select the right template\n      4. Coordination with order-service to ensure the field is populated for fragile orders\n\n    ## SLA\n    Notifications must be dispatched within 30 seconds of event consumption.\n    Fragile order notifications are considered higher priority — they should be sent\n    before the standard fulfilment SLA window begins.\n\n    Architecture Diagram:\n    ```mermaid\n    graph TD\n      A{Kafka: orders-created} -->|Consumes| B(Notification Service)\n      C{Kafka: inventory-low-stock} -->|Consumes| B\n      B -->|Email| D[SendGrid]\n      B -->|SMS| E[Twilio]\n      B -->|Read/Write| F[(notifications-db)]\n    ```\n  tags:\n    - nodejs\n    - kafka-consumer\n    - notifications\n    - sendgrid\n    - twilio\nspec:\n  type: service\n  lifecycle: production\n  owner: team-commerce\n  dependsOn:\n    - resource:kafka-orders-topic\n    - resource:kafka-inventory-topic\n    - resource:notifications-db\n  providesApis: []\n",
+    "last_updated": "2026-04-22 20:32:01.089761"
+  },
+  {
+    "service_name": "order-service",
+    "owner": "team-commerce",
+    "lifecycle": "production",
+    "metadata": {
+      "tags": [
+        "java",
+        "spring-boot",
+        "kafka-producer",
+        "critical-path",
+        "order-domain"
+      ],
+      "type": "service",
+      "dependsOn": [
+        "component:inventory-service",
+        "component:payment-processing-service",
+        "resource:kafka-orders-topic",
+        "resource:order-db"
+      ],
+      "providesApis": [
+        "api:order-rest-api"
+      ]
+    },
+    "raw_content": "apiVersion: backstage.io/v1alpha1\nkind: Component\nmetadata:\n  name: order-service\n  description: |\n    Core order management service. Handles the full lifecycle of a customer order:\n    creation, validation, status transitions, and fulfilment dispatch.\n\n    ## Responsibilities\n    - Accepts new orders via REST API from the web-frontend and mobile-gateway\n    - Validates item availability by calling inventory-service before confirming\n    - Charges customers by delegating to payment-processing-service\n    - Publishes order lifecycle events to Kafka (orders-created, orders-fulfilled, orders-cancelled)\n    - Stores order state in its own Postgres database (order-db)\n\n    ## Item model\n    Each order line carries an item_type field. Current valid values: \"standard\", \"perishable\".\n    Adding new item types (e.g. \"fragile\") requires:\n      1. A schema migration on order-db (orders table, order_lines table)\n      2. A new validation rule in OrderValidator — fragile items must have special_handling=true\n      3. A contract change on the orders-created Kafka event (add handling_instructions field)\n      4. Coordination with inventory-service (fragile stock is tracked separately)\n      5. Coordination with notification-service (fragile orders trigger an additional \"handle with care\" SMS)\n\n    ## Known fragility concerns\n    The OrderValidator is tightly coupled to the item_type enum. Any new item type must be\n    added to the ItemType enum in domain/models.py and the corresponding database migration\n    must be run before deployment. Rollback requires re-migration.\n\n    Architecture Diagram:\n    ```mermaid\n    graph TD\n      A[Web Frontend] -->|POST /orders| B(Order Service)\n      C[Mobile Gateway] -->|POST /orders| B\n      B -->|GET /stock/:item_id| D[Inventory Service]\n      B -->|POST /charge| E[Payment Processing Service]\n      B -->|Produces| F{Kafka: orders-created}\n      B -->|Produces| G{Kafka: orders-fulfilled}\n      F -->|Consumes| H[Notification Service]\n    ```\n  tags:\n    - java\n    - spring-boot\n    - kafka-producer\n    - critical-path\n    - order-domain\nspec:\n  type: service\n  lifecycle: production\n  owner: team-commerce\n  dependsOn:\n    - component:inventory-service\n    - component:payment-processing-service\n    - resource:kafka-orders-topic\n    - resource:order-db\n  providesApis:\n    - api:order-rest-api\n",
+    "last_updated": "2026-04-22 20:32:03.538109"
+  },
+  {
+    "service_name": "payment-processing-service",
+    "owner": "team-finance",
+    "lifecycle": "production",
+    "metadata": {
+      "tags": [
+        "python",
+        "fastapi",
+        "critical-path"
+      ],
+      "type": "service",
+      "dependsOn": [
+        "resource:kafka-payments-topic"
+      ],
+      "providesApis": [
+        "api:payment-rest-api"
+      ]
+    },
+    "raw_content": "apiVersion: backstage.io/v1alpha1\nkind: Component\nmetadata:\n  name: payment-processing-service\n  description: |\n    Handles all external credit card processing and internal wallet top-ups.\n\n    Architecture Diagram:\n    ```mermaid\n    graph TD\n      A[Web UI] -->|REST API| B(Payment Service)\n      B -->|Produces Event| C{Kafka Topic: payments-out}\n      B -->|REST API| D[Stripe External API]\n    ```\n  tags:\n    - python\n    - fastapi\n    - critical-path\nspec:\n  type: service\n  lifecycle: production\n  owner: team-finance\n  dependsOn:\n    - resource:kafka-payments-topic\n  providesApis:\n    - api:payment-rest-api\n",
+    "last_updated": "2026-04-22 20:21:14.827847"
+  }
+]

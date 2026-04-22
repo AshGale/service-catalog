@@ -1,0 +1,52 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: inventory-service
+  description: |
+    Inventory and stock management service. Tracks product stock levels, warehouse
+    locations, and item classifications across all fulfilment centres.
+
+    ## Responsibilities
+    - Exposes a REST API for stock reservation and release (called by order-service)
+    - Maintains a product catalogue with per-item handling metadata
+    - Tracks item_class per SKU: "standard", "perishable", "hazardous"
+    - Publishes low-stock events to Kafka (inventory-low-stock)
+
+    ## Item classification model
+    Each product has an item_class field in the products table. Fragile items are not
+    yet a first-class concept — they are currently stored as a freeform tag in the
+    product metadata JSONB column. To properly support fragile items:
+      1. Add "fragile" as a valid item_class enum value (migration on inventory-db)
+      2. Expose a new filter on GET /products?item_class=fragile so order-service
+         can query fragile stock separately
+      3. Add a fragile_stock_level field to the StockReservationResponse so callers
+         know whether a reservation covers fragile or standard handling
+      4. Update the low-stock Kafka event schema to include item_class
+
+    ## Warehouse handling rules
+    Fragile items are stored in zone F of each warehouse. Zone F has a capacity limit
+    of 2,000 units per fulfilment centre. Reserving fragile stock must check zone capacity,
+    not just total stock count. This logic lives in WarehouseAllocator.allocate().
+
+    Architecture Diagram:
+    ```mermaid
+    graph TD
+      A[Order Service] -->|GET /stock/:id| B(Inventory Service)
+      A -->|POST /reserve| B
+      B -->|Read/Write| C[(inventory-db Postgres)]
+      B -->|Produces| D{Kafka: inventory-low-stock}
+    ```
+  tags:
+    - python
+    - fastapi
+    - warehouse
+    - inventory-domain
+spec:
+  type: service
+  lifecycle: production
+  owner: team-logistics
+  dependsOn:
+    - resource:inventory-db
+    - resource:kafka-inventory-topic
+  providesApis:
+    - api:inventory-rest-api
