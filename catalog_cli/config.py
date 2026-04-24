@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 # ── Database ────────────────────────────────────────────────────────────────
 DB_HOST: str = os.getenv("CATALOG_DB_HOST", "localhost")

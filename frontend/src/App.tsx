@@ -1,8 +1,38 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
-const API = "/api";
+// ── Types ──────────────────────────────────────────────────────────────────
 
-// ── Theme: Industrial terminal aesthetic ──────────────────────────────────
+interface Service {
+  service_name: string;
+  owner: string | null;
+  lifecycle: string | null;
+  last_updated: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
+interface Deps {
+  dependsOn: string[];
+  providesApis: string[];
+}
+
+interface AskEntry {
+  q: string;
+  a: string;
+  context: number;
+}
+
+// Mermaid is loaded dynamically from CDN at runtime
+declare global {
+  interface Window {
+    mermaid?: {
+      initialize: (config: Record<string, unknown>) => void;
+      render: (id: string, code: string) => Promise<{ svg: string }>;
+    };
+  }
+}
+
+// ── Theme: Industrial terminal aesthetic ───────────────────────────────────
+
 const theme = {
   bg: "#0a0c0f",
   surface: "#12151a",
@@ -19,15 +49,16 @@ const theme = {
   warn: "#d4a017",
   tagBg: "#1a2418",
   tagBorder: "#2d4a2f",
-};
+} as const;
 
 const font = {
   mono: "'IBM Plex Mono', 'Fira Code', 'SF Mono', monospace",
   display: "'IBM Plex Sans Condensed', 'Arial Narrow', sans-serif",
-};
+} as const;
 
-// ── Shared styles ─────────────────────────────────────────────────────────
-const baseInput = {
+// ── Shared styles ──────────────────────────────────────────────────────────
+
+const baseInput: React.CSSProperties = {
   background: theme.surface,
   border: `1px solid ${theme.border}`,
   color: theme.text,
@@ -41,26 +72,29 @@ const baseInput = {
   transition: "border-color 0.2s",
 };
 
-// ── Tiny fetch wrapper ────────────────────────────────────────────────────
-async function api(path, opts = {}) {
+// ── Tiny typed fetch wrapper ───────────────────────────────────────────────
+
+const API = "/api";
+
+async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API}${path}`, opts);
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `${res.status} ${res.statusText}`);
+    const body = (await res.json().catch(() => ({}))) as { detail?: string };
+    throw new Error(body.detail ?? `${res.status} ${res.statusText}`);
   }
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
 // ── Components ────────────────────────────────────────────────────────────
 
-function Indicator({ status }) {
-  const colors = {
+function Indicator({ status }: { status: string | null }) {
+  const colors: Record<string, string> = {
     production: theme.accent,
     staging: theme.warn,
     experimental: theme.danger,
     deprecated: theme.textDim,
   };
-  const c = colors[status] || theme.textMuted;
+  const c = (status && colors[status]) || theme.textMuted;
   return (
     <span
       style={{
@@ -77,7 +111,7 @@ function Indicator({ status }) {
   );
 }
 
-function Tag({ children }) {
+function Tag({ children }: { children: React.ReactNode }) {
   return (
     <span
       style={{
@@ -98,7 +132,7 @@ function Tag({ children }) {
   );
 }
 
-function SectionLabel({ children }) {
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div
       style={{
@@ -116,7 +150,7 @@ function SectionLabel({ children }) {
   );
 }
 
-function EmptyState({ icon, message }) {
+function EmptyState({ icon, message }: { icon: string; message: string }) {
   return (
     <div
       style={{
@@ -137,14 +171,21 @@ function EmptyState({ icon, message }) {
   );
 }
 
-// ── Service List Panel ────────────────────────────────────────────────────
+// ── Service List Panel ─────────────────────────────────────────────────────
 
-function ServiceList({ services, selected, onSelect, loading }) {
+interface ServiceListProps {
+  services: Service[];
+  selected: string | null;
+  onSelect: (name: string) => void;
+  loading: boolean;
+}
+
+function ServiceList({ services, selected, onSelect, loading }: ServiceListProps) {
   const [filter, setFilter] = useState("");
   const filtered = services.filter(
     (s) =>
       s.service_name.toLowerCase().includes(filter.toLowerCase()) ||
-      (s.owner || "").toLowerCase().includes(filter.toLowerCase())
+      (s.owner ?? "").toLowerCase().includes(filter.toLowerCase())
   );
 
   return (
@@ -166,8 +207,8 @@ function ServiceList({ services, selected, onSelect, loading }) {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           style={{ ...baseInput, fontSize: 12 }}
-          onFocus={(e) => (e.target.style.borderColor = theme.borderActive)}
-          onBlur={(e) => (e.target.style.borderColor = theme.border)}
+          onFocus={(e) => (e.currentTarget.style.borderColor = theme.borderActive)}
+          onBlur={(e) => (e.currentTarget.style.borderColor = theme.border)}
         />
       </div>
 
@@ -221,7 +262,7 @@ function ServiceList({ services, selected, onSelect, loading }) {
                     {svc.service_name}
                   </div>
                   <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 2 }}>
-                    {svc.owner || "unowned"} · {svc.lifecycle || "unknown"}
+                    {svc.owner ?? "unowned"} · {svc.lifecycle ?? "unknown"}
                   </div>
                 </div>
               </button>
@@ -246,40 +287,43 @@ function ServiceList({ services, selected, onSelect, loading }) {
   );
 }
 
-// ── Detail Panel ──────────────────────────────────────────────────────────
+// ── Detail Panel ───────────────────────────────────────────────────────────
 
-function DetailPanel({ serviceName }) {
-  const [data, setData] = useState(null);
-  const [tags, setTags] = useState([]);
-  const [deps, setDeps] = useState(null);
-  const [diagram, setDiagram] = useState(null);
+type DetailTab = "overview" | "diagram" | "dependencies";
+
+function DetailPanel({ serviceName }: { serviceName: string | null }) {
+  const [data, setData] = useState<Service | null>(null);
+  const [tags, setTags] = useState<string[]>([]);
+  const [deps, setDeps] = useState<Deps | null>(null);
+  const [diagram, setDiagram] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState<DetailTab>("overview");
 
   useEffect(() => {
     if (!serviceName) return;
     setLoading(true);
     setTab("overview");
     Promise.all([
-      api(`/services/${serviceName}`),
-      api(`/services/${serviceName}/tags`).catch(() => []),
-      api(`/services/${serviceName}/deps`).catch(() => null),
-      api(`/services/${serviceName}/diagram`).catch(() => ({ mermaid: null })),
+      apiFetch<Service>(`/services/${serviceName}`),
+      apiFetch<string[]>(`/services/${serviceName}/tags`).catch(() => [] as string[]),
+      apiFetch<Deps>(`/services/${serviceName}/deps`).catch(() => null),
+      apiFetch<{ mermaid: string | null }>(`/services/${serviceName}/diagram`).catch(() => ({
+        mermaid: null,
+      })),
     ]).then(([svc, t, d, dia]) => {
       setData(svc);
       setTags(t);
       setDeps(d);
-      setDiagram(dia?.mermaid || null);
+      setDiagram(dia?.mermaid ?? null);
       setLoading(false);
     });
   }, [serviceName]);
 
-  if (!serviceName)
-    return <EmptyState icon="←" message="select a service to inspect" />;
+  if (!serviceName) return <EmptyState icon="←" message="select a service to inspect" />;
   if (loading) return <EmptyState icon="⟳" message="loading…" />;
   if (!data) return <EmptyState icon="!" message="failed to load service" />;
 
-  const tabs = ["overview", "diagram", "dependencies"];
+  const tabs: DetailTab[] = ["overview", "diagram", "dependencies"];
 
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
@@ -301,8 +345,8 @@ function DetailPanel({ serviceName }) {
           </h2>
         </div>
         <div style={{ fontFamily: font.mono, fontSize: 12, color: theme.textMuted }}>
-          {data.owner || "unowned"} · {data.lifecycle || "unknown"} · updated{" "}
-          {data.last_updated?.split(".")[0] || "—"}
+          {data.owner ?? "unowned"} · {data.lifecycle ?? "unknown"} · updated{" "}
+          {data.last_updated?.split(".")[0] ?? "—"}
         </div>
       </div>
 
@@ -405,18 +449,13 @@ function DetailPanel({ serviceName }) {
 
       {tab === "dependencies" && (
         <div>
-          {deps?.dependsOn?.length > 0 && (
+          {(deps?.dependsOn?.length ?? 0) > 0 && (
             <>
               <SectionLabel>depends on</SectionLabel>
-              {deps.dependsOn.map((d) => (
+              {deps!.dependsOn.map((d) => (
                 <div
                   key={d}
-                  style={{
-                    fontFamily: font.mono,
-                    fontSize: 13,
-                    color: theme.text,
-                    padding: "6px 0",
-                  }}
+                  style={{ fontFamily: font.mono, fontSize: 13, color: theme.text, padding: "6px 0" }}
                 >
                   <span style={{ color: theme.danger, marginRight: 8 }}>→</span>
                   {d}
@@ -424,18 +463,13 @@ function DetailPanel({ serviceName }) {
               ))}
             </>
           )}
-          {deps?.providesApis?.length > 0 && (
+          {(deps?.providesApis?.length ?? 0) > 0 && (
             <>
               <SectionLabel>provides apis</SectionLabel>
-              {deps.providesApis.map((a) => (
+              {deps!.providesApis.map((a) => (
                 <div
                   key={a}
-                  style={{
-                    fontFamily: font.mono,
-                    fontSize: 13,
-                    color: theme.text,
-                    padding: "6px 0",
-                  }}
+                  style={{ fontFamily: font.mono, fontSize: 13, color: theme.text, padding: "6px 0" }}
                 >
                   <span style={{ color: theme.accentText, marginRight: 8 }}>←</span>
                   {a}
@@ -443,7 +477,7 @@ function DetailPanel({ serviceName }) {
               ))}
             </>
           )}
-          {(!deps?.dependsOn?.length && !deps?.providesApis?.length) && (
+          {!(deps?.dependsOn?.length) && !(deps?.providesApis?.length) && (
             <EmptyState icon="◇" message="no dependencies declared" />
           )}
         </div>
@@ -452,12 +486,12 @@ function DetailPanel({ serviceName }) {
   );
 }
 
-// ── Mermaid live preview (loads from CDN) ─────────────────────────────────
+// ── Mermaid live preview (loaded from CDN) ─────────────────────────────────
 
-function MermaidPreview({ code }) {
-  const ref = useRef(null);
-  const [svg, setSvg] = useState(null);
-  const [error, setError] = useState(null);
+function MermaidPreview({ code }: { code: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [svg, setSvg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!code) return;
@@ -466,16 +500,16 @@ function MermaidPreview({ code }) {
     (async () => {
       try {
         if (!window.mermaid) {
-          // Dynamic import from CDN
-          const script = document.createElement("script");
-          script.src = "https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js";
-          script.async = true;
-          await new Promise((res, rej) => {
-            script.onload = res;
-            script.onerror = rej;
+          await new Promise<void>((res, rej) => {
+            const script = document.createElement("script");
+            script.src =
+              "https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js";
+            script.async = true;
+            script.onload = () => res();
+            script.onerror = () => rej(new Error("Failed to load mermaid"));
             document.head.appendChild(script);
           });
-          window.mermaid.initialize({
+          window.mermaid!.initialize({
             startOnLoad: false,
             theme: "dark",
             themeVariables: {
@@ -491,14 +525,14 @@ function MermaidPreview({ code }) {
         }
 
         const id = `mermaid-${Date.now()}`;
-        const { svg: rendered } = await window.mermaid.render(id, code);
+        const { svg: rendered } = await window.mermaid!.render(id, code);
         if (!cancelled) {
           setSvg(rendered);
           setError(null);
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err.message || "Render failed");
+          setError(err instanceof Error ? err.message : "Render failed");
           setSvg(null);
         }
       }
@@ -546,31 +580,29 @@ function MermaidPreview({ code }) {
   );
 }
 
-// ── Ask Panel (RAG) ───────────────────────────────────────────────────────
+// ── Ask Panel (RAG) ────────────────────────────────────────────────────────
 
 function AskPanel() {
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [history, setHistory] = useState([]);
+  const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<AskEntry[]>([]);
 
   const handleAsk = useCallback(async () => {
     if (!question.trim()) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await api("/ask", {
+      const res = await apiFetch<{ answer: string; context_count: number }>("/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: question.trim() }),
       });
-      const entry = { q: question.trim(), a: res.answer, context: res.context_count };
-      setAnswer(entry);
+      const entry: AskEntry = { q: question.trim(), a: res.answer, context: res.context_count };
       setHistory((h) => [entry, ...h]);
       setQuestion("");
     } catch (err) {
-      setError(err.message);
+      setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
@@ -587,8 +619,8 @@ function AskPanel() {
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAsk()}
           style={{ ...baseInput, flex: 1 }}
-          onFocus={(e) => (e.target.style.borderColor = theme.borderActive)}
-          onBlur={(e) => (e.target.style.borderColor = theme.border)}
+          onFocus={(e) => (e.currentTarget.style.borderColor = theme.borderActive)}
+          onBlur={(e) => (e.currentTarget.style.borderColor = theme.border)}
         />
         <button
           onClick={handleAsk}
@@ -632,18 +664,10 @@ function AskPanel() {
       {history.map((entry, i) => (
         <div
           key={i}
-          style={{
-            marginBottom: 20,
-            animation: i === 0 ? "fadeIn 0.3s ease" : undefined,
-          }}
+          style={{ marginBottom: 20, animation: i === 0 ? "fadeIn 0.3s ease" : undefined }}
         >
           <div
-            style={{
-              fontFamily: font.mono,
-              fontSize: 12,
-              color: theme.textMuted,
-              marginBottom: 8,
-            }}
+            style={{ fontFamily: font.mono, fontSize: 12, color: theme.textMuted, marginBottom: 8 }}
           >
             <span style={{ color: theme.accentText }}>❯</span> {entry.q}
           </div>
@@ -663,12 +687,7 @@ function AskPanel() {
             {entry.a}
           </div>
           <div
-            style={{
-              fontFamily: font.mono,
-              fontSize: 10,
-              color: theme.textDim,
-              marginTop: 6,
-            }}
+            style={{ fontFamily: font.mono, fontSize: 10, color: theme.textDim, marginTop: 6 }}
           >
             {entry.context} context doc{entry.context !== 1 ? "s" : ""} used
           </div>
@@ -682,15 +701,15 @@ function AskPanel() {
   );
 }
 
-// ── Ingest Panel ──────────────────────────────────────────────────────────
+// ── Ingest Panel ───────────────────────────────────────────────────────────
 
-function IngestPanel({ onIngested }) {
+function IngestPanel({ onIngested }: { onIngested: () => void }) {
   const [dragging, setDragging] = useState(false);
-  const [status, setStatus] = useState(null);
-  const [error, setError] = useState(null);
-  const inputRef = useRef(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleFile = async (file) => {
+  const handleFile = async (file: File | undefined) => {
     if (!file) return;
     setStatus("uploading…");
     setError(null);
@@ -699,11 +718,14 @@ function IngestPanel({ onIngested }) {
     form.append("file", file);
 
     try {
-      const res = await api("/ingest", { method: "POST", body: form });
+      const res = await apiFetch<{ ingested: string[] }>("/ingest", {
+        method: "POST",
+        body: form,
+      });
       setStatus(`ingested: ${res.ingested.join(", ")}`);
-      if (onIngested) onIngested();
+      onIngested();
     } catch (err) {
-      setError(err.message);
+      setError(err instanceof Error ? err.message : "Unknown error");
       setStatus(null);
     }
   };
@@ -751,25 +773,13 @@ function IngestPanel({ onIngested }) {
 
       {status && (
         <div
-          style={{
-            marginTop: 14,
-            fontFamily: font.mono,
-            fontSize: 12,
-            color: theme.accentText,
-          }}
+          style={{ marginTop: 14, fontFamily: font.mono, fontSize: 12, color: theme.accentText }}
         >
           ✓ {status}
         </div>
       )}
       {error && (
-        <div
-          style={{
-            marginTop: 14,
-            fontFamily: font.mono,
-            fontSize: 12,
-            color: theme.danger,
-          }}
-        >
+        <div style={{ marginTop: 14, fontFamily: font.mono, fontSize: 12, color: theme.danger }}>
           ✗ {error}
         </div>
       )}
@@ -777,17 +787,19 @@ function IngestPanel({ onIngested }) {
   );
 }
 
-// ── App ───────────────────────────────────────────────────────────────────
+// ── App ────────────────────────────────────────────────────────────────────
+
+type View = "catalog" | "ask" | "ingest";
 
 export default function App() {
-  const [services, setServices] = useState([]);
-  const [selected, setSelected] = useState(null);
-  const [view, setView] = useState("catalog"); // catalog | ask | ingest
+  const [services, setServices] = useState<Service[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [view, setView] = useState<View>("catalog");
   const [loading, setLoading] = useState(true);
 
   const fetchServices = useCallback(() => {
     setLoading(true);
-    api("/services")
+    apiFetch<Service[]>("/services")
       .then(setServices)
       .catch(() => setServices([]))
       .finally(() => setLoading(false));
@@ -797,7 +809,7 @@ export default function App() {
     fetchServices();
   }, [fetchServices]);
 
-  const navItems = [
+  const navItems: { key: View; label: string }[] = [
     { key: "catalog", label: "catalog" },
     { key: "ask", label: "ask" },
     { key: "ingest", label: "ingest" },

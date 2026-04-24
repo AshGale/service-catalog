@@ -50,7 +50,16 @@ ingest: ## Ingest catalog-info.yaml files (set INGEST_PATH=./your/dir)
 install-web: ## Install with web UI dependencies (FastAPI + Uvicorn)
 	pip install -e ".[web]"
 
-serve: ## Start the web UI (FastAPI + Uvicorn on port 8000)
+install-ui: ## Install frontend npm dependencies
+	cd frontend && npm install
+
+build-ui: ## Build the React/TS frontend into frontend/dist/
+	cd frontend && npm run build
+
+dev-ui: ## Start Vite dev server (hot reload, proxies /api to port 8000)
+	cd frontend && npm run dev
+
+serve: ## Start the FastAPI server on port 8000 (serves built frontend + API)
 	uvicorn catalog_cli.server:app --reload --host 0.0.0.0 --port 8000
 
 # ── Testing & Quality ──────────────────────────────────────────────────
@@ -71,13 +80,15 @@ fmt: ## Auto-format with Ruff
 
 # ── Setup shortcut ──────────────────────────────────────────────────────
 
-bootstrap: up ## Full first-time setup: container + install + init schema
+bootstrap: up ## Full first-time setup: container + install + init schema + build UI
 	@echo "Waiting for Postgres to be healthy…"
 	@until docker exec catalog-db pg_isready -U $(CATALOG_DB_USER) -d $(CATALOG_DB_NAME) > /dev/null 2>&1; do sleep 1; done
 	@echo "Postgres ready."
 	$(MAKE) install-web
 	$(MAKE) init-db
-	@echo "\n✓ Ready. Run: catalog-cli --help"
+	$(MAKE) install-ui
+	$(MAKE) build-ui
+	@echo "\n✓ Ready. Run: make serve  or  catalog-cli --help"
 
 # ── Cleanup ─────────────────────────────────────────────────────────────
 
